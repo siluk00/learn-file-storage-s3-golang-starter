@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 
@@ -21,6 +25,7 @@ type apiConfig struct {
 	s3Region         string
 	s3CfDistribution string
 	port             string
+	s3client         *s3.Client
 }
 
 /*
@@ -85,6 +90,12 @@ func main() {
 		log.Fatal("PORT environment variable is not set")
 	}
 
+	awsCfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		log.Fatalf("error loading aws default configurations")
+	}
+	client := s3.NewFromConfig(awsCfg)
+
 	cfg := apiConfig{
 		db:               db,
 		jwtSecret:        jwtSecret,
@@ -95,6 +106,7 @@ func main() {
 		s3Region:         s3Region,
 		s3CfDistribution: s3CfDistribution,
 		port:             port,
+		s3client:         client,
 	}
 
 	err = cfg.ensureAssetsDir()
@@ -104,10 +116,15 @@ func main() {
 
 	mux := http.NewServeMux()
 	appHandler := http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))
-	mux.Handle("/app/", appHandler)
+	mux.Handle("/app/", noCacheMiddleware(appHandler))
 
-	assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
-	mux.Handle("/assets/", cacheMiddleware(assetsHandler))
+	/*
+		assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
+		mux.Handle("/assets/", noCacheMiddleware(assetsHandler))
+	*/
+
+	assetsHandler := http.StripPrefix("/app/assets/", http.FileServer(http.Dir(assetsRoot)))
+	mux.Handle("/app/assets/", noCacheMiddleware(assetsHandler))
 
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
@@ -116,10 +133,10 @@ func main() {
 	mux.HandleFunc("POST /api/users", cfg.handlerUsersCreate)
 
 	mux.HandleFunc("POST /api/videos", cfg.handlerVideoMetaCreate)
-	mux.HandleFunc("POST /api/thumbnail_upload/{videoID}", cfg.handlerUploadThumbnail)
+	mux.Handle("POST /api/thumbnail_upload/{videoID}", noCacheMiddlewareFunc(cfg.handlerUploadThumbnail))
 	mux.HandleFunc("POST /api/video_upload/{videoID}", cfg.handlerUploadVideo)
-	mux.HandleFunc("GET /api/videos", cfg.handlerVideosRetrieve)
-	mux.HandleFunc("GET /api/videos/{videoID}", cfg.handlerVideoGet)
+	mux.HandleFunc("GET /api/videos", noCacheMiddlewareFunc(cfg.handlerVideosRetrieve))
+	mux.HandleFunc("GET /api/videos/{videoID}", noCacheMiddlewareFunc(cfg.handlerVideoGet))
 	//mux.HandleFunc("GET /api/thumbnails/{videoID}", cfg.handlerThumbnailGet)
 	mux.HandleFunc("DELETE /api/videos/{videoID}", cfg.handlerVideoMetaDelete)
 

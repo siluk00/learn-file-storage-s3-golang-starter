@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -52,12 +54,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	defer formFile.Close()
 	contentType := formFileHeader.Header.Get("Content-Type")
-	/*file, err := io.ReadAll(formFile)
-
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "error reading file", err)
-		return
-	}*/
 
 	video, err := cfg.db.GetVideo(videoID)
 
@@ -65,16 +61,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusInternalServerError, "couldn't find video on db", err)
 		return
 	}
-
-	//fileStr := base64.StdEncoding.EncodeToString(file)
-	//dataUrl := "data:" + contentType + ";base64," + fileStr
-
-	/*
-		var thumb thumbnail
-		thumb.mediaType = contentType
-		thumb.data = file
-		videoThumbnails[videoID] = thumb
-	*/
 
 	mediaType, _, err := mime.ParseMediaType(contentType)
 
@@ -84,14 +70,32 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	if mediaType != "image/jpeg" && mediaType != "image/png" {
-		respondWithError(w, http.StatusBadRequest, "wrong media type", err)
+		respondWithError(w, http.StatusBadRequest, "wrong media type", nil)
 		return
 	}
 
-	extension := strings.Split(contentType, "/")[1]
-	url := filepath.Join(cfg.assetsRoot, videoIDString+"."+extension)
-	fmt.Println(url)
+	randName := make([]byte, 32)
+	_, err = rand.Read(randName)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "unable to generate id", err)
+	}
+
+	// First, create just the base filename (without assets/)
+	baseFileName := base64.RawURLEncoding.EncodeToString(randName) + "." + strings.Split(mediaType, "/")[1]
+
+	// Create the full URL for the database (with assets/)
+	thumbnailUrl := "assets/" + baseFileName
+
+	// Create the full filesystem path
+	url := filepath.Join(cfg.assetsRoot, baseFileName)
+
+	// Create the file (no need for TrimPrefix)
 	fileThumb, err := os.Create(url)
+
+	fmt.Println("Database URL:", thumbnailUrl)
+	fmt.Println("File save path:", url)
+	fmt.Println("Assets root:", cfg.assetsRoot)
 
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error creating file", err)
@@ -105,15 +109,17 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumbnailUrl := "http://localhost:" + cfg.port + "/" + url
-	fmt.Println(thumbnailUrl)
-
 	video.ThumbnailURL = &thumbnailUrl
 	err = cfg.db.UpdateVideo(video)
 
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "couldn't update video", err)
 		return
+	}
+	fileInfo, _ := os.Stat(url)
+	if fileInfo != nil {
+		fmt.Println("File size:", fileInfo.Size())
+		fmt.Println("File permissions:", fileInfo.Mode())
 	}
 
 	respondWithJSON(w, http.StatusOK, &video)

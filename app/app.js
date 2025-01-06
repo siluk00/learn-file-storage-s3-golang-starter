@@ -1,3 +1,5 @@
+
+
 document.addEventListener("DOMContentLoaded", async () => {
   const token = localStorage.getItem("token");
 
@@ -216,6 +218,7 @@ async function getVideo(videoID) {
 let currentVideo = null;
 
 function viewVideo(video) {
+  console.log("viewVideo called with video:", video);
   currentVideo = video;
   document.getElementById("video-display").style.display = "block";
   document.getElementById("video-title-display").textContent = video.title;
